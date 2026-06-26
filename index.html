@@ -32,11 +32,23 @@ if(__speak){
       if(!res.ok){
         throw new Error(await res.text()||'Online voice failed');
       }
-      const blob=await res.blob();
+      // Tencent Function URL may return a combined Content-Type such as
+      // "application/json, audio/mpeg". Rebuild the Blob with the correct
+      // MIME type so browsers can decode and play it reliably.
+      const audioBuffer=await res.arrayBuffer();
+      if(!audioBuffer.byteLength){
+        throw new Error('Empty audio response');
+      }
+      const blob=new Blob([audioBuffer],{type:'audio/mpeg'});
       const audioUrl=URL.createObjectURL(blob);
-      const audio=new Audio(audioUrl);
+      const audio=new Audio();
+      audio.preload='auto';
+      audio.src=audioUrl;
       audio.onended=()=>URL.revokeObjectURL(audioUrl);
-      audio.onerror=()=>URL.revokeObjectURL(audioUrl);
+      audio.onerror=()=>{
+        URL.revokeObjectURL(audioUrl);
+        console.error('Audio decode/playback error',audio.error);
+      };
       await audio.play();
       if(__voiceStatus)__voiceStatus.textContent='';
     }catch(error){

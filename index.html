@@ -132,7 +132,7 @@ async function loadPhonetic(text){
   if(phoneticStatus){
     phoneticStatus.textContent=
       errors.length
-        ? 'Some phonetic results failed. Please try again.'
+        ? 'Failed: '+errors.join(', ')+'. Check that function URL.'
         : '';
   }
 }
@@ -156,7 +156,8 @@ if(__speak){
         body:JSON.stringify({text})
       });
       if(!res.ok){
-        throw new Error(await res.text()||'Online voice failed');
+        const errText=await res.text();
+        throw new Error('TTS HTTP '+res.status+': '+(errText||'Online voice failed').slice(0,200));
       }
       // Tencent Function URL may return either real MP3 bytes or a Base64
       // string. Detect both formats and convert them into valid MP3 bytes.
@@ -212,8 +213,8 @@ if(__speak){
       await audio.play();
       if(__voiceStatus)__voiceStatus.textContent='';
     }catch(error){
-      console.error(error);
-      if(__voiceStatus)__voiceStatus.textContent='Online voice failed. Please try again.';
+      console.error('TTS error:',error);
+      if(__voiceStatus)__voiceStatus.textContent='Online voice failed: '+(error.message||error);
     }finally{
       __speak.disabled=false;
     }
@@ -227,9 +228,36 @@ async function translateChinese(text){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text})
   });
-  const data=await res.json();
-  if(!res.ok){throw new Error(data.error||'Translation failed');}
-  return data.translation||'';
+
+  const raw=await res.text();
+  let data={};
+
+  try{
+    data=raw ? JSON.parse(raw) : {};
+  }catch(_){
+    throw new Error('Translator returned non-JSON: '+raw.slice(0,200));
+  }
+
+  if(!res.ok){
+    throw new Error(
+      'Translator HTTP '+res.status+': '+
+      (data.error||data.details||data.message||raw||'Translation failed').slice(0,200)
+    );
+  }
+
+  const zh=
+    data.translation||
+    data.translatedText||
+    data.text||
+    data?.translations?.[0]?.text||
+    data?.[0]?.translations?.[0]?.text||
+    '';
+
+  if(!zh){
+    throw new Error('No translation field in response: '+raw.slice(0,200));
+  }
+
+  return zh;
 }
 if(__translateBtn){
   __translateBtn.onclick=async function(){
@@ -246,7 +274,8 @@ if(__translateBtn){
       if(c)c.textContent=zh;
       if(translateStatus)translateStatus.textContent='Done';
     }catch(e){
-      if(translateStatus)translateStatus.textContent='Translation failed. Please try again.';
+      console.error('Translation error:',e);
+      if(translateStatus)translateStatus.textContent='Translation failed: '+(e.message||e);
     }finally{
       __translateBtn.disabled=false;
     }

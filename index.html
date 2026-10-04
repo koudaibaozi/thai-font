@@ -62,7 +62,7 @@
 @media(max-width:650px){.handwriting-canvas-wrap{height:190px}.handwriting-result{font-size:25px}}
 
 </style></head><body><h2>Thai Font</h2><textarea id="t" placeholder="Paste Thai here..."></textarea>
-<div style="margin:12px 0;"><button id="speakBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">Speak</button><button id="clearBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">Clear</button><button id="translateBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">中文</button><span id="voiceStatus" style="font-size:14px;color:#b00020;"></span></div><div class="handwriting-box" id="handwritingBox"><div class="handwriting-title">Handwriting</div><div class="handwriting-canvas-wrap"><canvas id="handwritingCanvas"></canvas><div class="handwriting-hint" id="handwritingHint">Write Thai here</div></div><div class="handwriting-result empty" id="handwritingResult">Handwriting recognition will appear here.</div><div class="handwriting-actions"><button id="handwritingUndo" type="button">Undo</button><button id="handwritingClear" type="button">Clear handwriting</button><button id="handwritingConfirm" type="button">✓</button><span id="handwritingStatus">Write Thai above. Vocab runs only after Confirm ✓.</span></div></div><div class="box"><b>Vocab</b><div class="vocab-list" id="vocabList"></div><div class="translate-row"><span class="status" id="vocabStatus"></span></div></div><div class="box"><b>Phonetic</b><div class="out" id="thaiPhonetic"></div></div><div class="box"><b>Loop (Noto Serif Thai)</b><div class="out" id="a"></div></div><div class="box"><b>Loopless (Noto Sans Thai)</b><div class="out" id="b"></div></div><div class="box"><b>Chinese</b><div class="out" id="c"></div><div class="translate-row"><span class="status" id="translateStatus"></span></div></div><div class="tool-box"><div class="tool-title">Tool</div><div class="shortcut-grid">
+<div style="margin:12px 0;"><button id="speakBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">Speak</button><button id="clearBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">Clear</button><button id="translateBtn" style="padding:8px 18px;border:none;border-radius:8px;cursor:pointer;margin-right:8px;">中文</button><span id="voiceStatus" style="font-size:14px;color:#b00020;"></span></div><div class="handwriting-box" id="handwritingBox"><div class="handwriting-title">Handwriting</div><div class="handwriting-canvas-wrap"><canvas id="handwritingCanvas"></canvas><div class="handwriting-hint" id="handwritingHint">Write Thai here</div></div><div class="handwriting-result empty" id="handwritingResult">Handwriting recognition will appear here.</div><div class="handwriting-actions"><button id="handwritingUndo" type="button">Undo</button><button id="handwritingClear" type="button">Clear handwriting</button><button id="handwritingConfirm" type="button">✓</button><span id="handwritingStatus">Write Thai above. OCR auto-crops and recognizes after you pause. Vocab runs only after Confirm ✓.</span></div></div><div class="box"><b>Vocab</b><div class="vocab-list" id="vocabList"></div><div class="translate-row"><span class="status" id="vocabStatus"></span></div></div><div class="box"><b>Phonetic</b><div class="out" id="thaiPhonetic"></div></div><div class="box"><b>Loop (Noto Serif Thai)</b><div class="out" id="a"></div></div><div class="box"><b>Loopless (Noto Sans Thai)</b><div class="out" id="b"></div></div><div class="box"><b>Chinese</b><div class="out" id="c"></div><div class="translate-row"><span class="status" id="translateStatus"></span></div></div><div class="tool-box"><div class="tool-title">Tool</div><div class="shortcut-grid">
 <a class="shortcut" href="http://www.thai008.com/" rel="noopener noreferrer" target="_blank"><span class="ico">泰</span><span>Thai008</span></a>
 <a class="shortcut" href="https://www.thai2english.com/" rel="noopener noreferrer" target="_blank"><span class="ico">th</span><span>Thai2en</span></a>
 <a class="shortcut" href="https://fanyi.youdao.com/#/TextTranslate" rel="noopener noreferrer" target="_blank"><span class="ico">译</span><span>Youdao</span></a>
@@ -452,28 +452,102 @@ if(__btn){
     }
   }
 
-  // Export handwriting as a white PNG.
-  // White background generally works better for OCR than transparent canvas.
+  // Export only the handwriting area instead of the whole large canvas.
+  // This gives OCR a much larger text-to-background ratio.
   function makeOcrImage(){
-    const rect=canvas.getBoundingClientRect();
-    const scale=2;
+    if(!strokes.length)return '';
+
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+
+    for(const stroke of strokes){
+      for(const p of stroke){
+        if(!Number.isFinite(p.x)||!Number.isFinite(p.y))continue;
+        minX=Math.min(minX,p.x);
+        minY=Math.min(minY,p.y);
+        maxX=Math.max(maxX,p.x);
+        maxY=Math.max(maxY,p.y);
+      }
+    }
+
+    if(!Number.isFinite(minX))return '';
+
+    let inkW=Math.max(1,maxX-minX);
+    let inkH=Math.max(1,maxY-minY);
+    const maxInk=Math.max(inkW,inkH);
+
+    // Keep some white space around Thai marks/tones.
+    const padding=Math.max(18,maxInk*0.18);
+
+    minX-=padding;
+    minY-=padding;
+    maxX+=padding;
+    maxY+=padding;
+
+    const cropW=Math.max(1,maxX-minX);
+    const cropH=Math.max(1,maxY-minY);
+
+    // Upscale small handwriting aggressively, but keep request size reasonable.
+    const targetLongest=900;
+    const scale=Math.max(2,Math.min(5,targetLongest/Math.max(cropW,cropH)));
 
     const out=document.createElement('canvas');
-    out.width=Math.max(1,Math.round(rect.width*scale));
-    out.height=Math.max(1,Math.round(rect.height*scale));
+    out.width=Math.max(220,Math.round(cropW*scale));
+    out.height=Math.max(220,Math.round(cropH*scale));
 
     const outCtx=out.getContext('2d');
-
     outCtx.fillStyle='#fff';
     outCtx.fillRect(0,0,out.width,out.height);
 
+    outCtx.save();
     outCtx.scale(scale,scale);
+    outCtx.translate(-minX,-minY);
 
+    // Slightly thicker strokes help when the handwriting is enlarged.
     for(const stroke of strokes){
-      drawStrokeTo(outCtx,stroke);
+      if(!stroke||!stroke.length)continue;
+
+      outCtx.save();
+      outCtx.lineCap='round';
+      outCtx.lineJoin='round';
+      outCtx.strokeStyle='#000';
+      outCtx.lineWidth=4.2;
+      outCtx.beginPath();
+      outCtx.moveTo(stroke[0].x,stroke[0].y);
+
+      for(let i=1;i<stroke.length;i++){
+        outCtx.lineTo(stroke[i].x,stroke[i].y);
+      }
+
+      if(stroke.length===1){
+        outCtx.lineTo(stroke[0].x+0.1,stroke[0].y+0.1);
+      }
+
+      outCtx.stroke();
+      outCtx.restore();
     }
 
+    outCtx.restore();
     return out.toDataURL('image/png');
+  }
+
+  function extractThaiOnly(text){
+    const s=String(text||'').normalize('NFC');
+
+    // Keep Thai Unicode characters plus spaces/newlines only.
+    // Latin/English OCR guesses are discarded.
+    const cleaned=s
+      .replace(/[^\u0E00-\u0E7F\s]/g,'')
+      .replace(/\s+/g,' ')
+      .trim();
+
+    return /[\u0E00-\u0E7F]/.test(cleaned) ? cleaned : '';
+  }
+
+  function isNoTextError(raw,data){
+    const combined=(String(raw||'')+' '+JSON.stringify(data||{})).toLowerCase();
+    return combined.includes('imagenotext') ||
+           combined.includes('未检测到文本') ||
+           combined.includes('no text');
   }
 
   function scheduleOcr(delay=1000){
@@ -530,6 +604,15 @@ if(__btn){
       }
 
       if(!res.ok){
+        // "No text" is common while the user is still forming a Thai character.
+        // Do not show the huge Tencent traceback in the UI.
+        if(isNoTextError(raw,data)){
+          if(thisRequest===ocrRequestId && status){
+            status.textContent='Not recognized yet — keep writing.';
+          }
+          return;
+        }
+
         throw new Error(
           `OCR HTTP ${res.status}: ${raw}`
         );
@@ -540,7 +623,17 @@ if(__btn){
         return;
       }
 
-      setRecognition(data.text||'');
+      const thaiOnly=extractThaiOnly(data.text||'');
+
+      if(thaiOnly){
+        setRecognition(thaiOnly);
+      }else{
+        // Tencent sometimes guesses Latin letters for partial Thai handwriting.
+        // Ignore those guesses instead of replacing the last valid Thai result.
+        if(status){
+          status.textContent='No Thai result yet — keep writing.';
+        }
+      }
 
     }catch(error){
       if(error?.name==='AbortError'){
@@ -550,7 +643,7 @@ if(__btn){
       console.error('Handwriting OCR error:',error);
 
       if(status){
-        status.textContent='OCR failed: '+(error?.message||error);
+        status.textContent='OCR temporarily failed. Please keep writing or try again.';
       }
     }
   }
@@ -631,7 +724,7 @@ if(__btn){
     }
 
     if(status){
-      status.textContent='Write Thai above. Vocab runs only after Confirm ✓.';
+      status.textContent='Write Thai above. OCR auto-crops and recognizes after you pause. Vocab runs only after Confirm ✓.';
     }
   }
 

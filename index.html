@@ -531,9 +531,7 @@ if(__btn){
 
       if(!res.ok){
         throw new Error(
-          data.details||
-          data.error||
-          ('OCR HTTP '+res.status)
+          `OCR HTTP ${res.status}: ${raw}`
         );
       }
 
